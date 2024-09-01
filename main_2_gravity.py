@@ -26,16 +26,7 @@ class Solid:
     m: float = 1.0  # 質量
     fx: float = 0.0  # x方向に加える力
     fy: float = 0.0  # y方向に加える力
-    friction_x: float = 0.3  # 水平方向に擦れるときの摩擦 0が最大 1が摩擦なし
-    friction_y: float = 0.0  # 垂直方向に擦れるときの摩擦
-    obstacle_on_surface: list["None | Solid"] = field(
-        default_factory=lambda: [None, None, None, None],
-    )  # 物体中心から4方向の面が別の物体に接しているか 接して入ればその物体・接していなければNone
-    #    下の定数を使う(X_POS, X_NEG, Y_POS, Y_NEG)
-    #    obstacle_on_surface[X_POS]はx軸方向正の方向の接触物体を示す
 
-
-X_POS, X_NEG, Y_POS, Y_NEG = range(4)
 
 # ステージ
 # 床：o 橋：- 空気：_
@@ -60,12 +51,6 @@ STAGE = [
     "____________________",
     "ooo-----oooo-----ooo",  # 一番下はプレイヤーがスタートする床oが一つ以上必要
 ]
-# ランダム生成
-# STAGE = [
-#     "".join(random.choices("_oo--", k=10))
-#     if i % 3 == 0 else "_" * 10
-#     for i in reversed(range(10))
-# ]
 
 # -------------------------------------
 # すべての物体を記憶するリストと関係する処理
@@ -191,11 +176,10 @@ def main_render():
     # 画面の上にデバッグ情報を表示
     # draw player's geometry on canvas
     player = get_object_by_tag(tag="player")
-    obs = list(map(int, map(bool, player.obstacle_on_surface)))
     cvs.create_text(
         10,
         0,
-        text=f"v=({player.vx:5.2f}, {player.vy:5.2f}), x=({player.x:6.2f}, {player.y:6.2f}), jump={player_jump}, move={player_move}, surface={obs}",
+        text=f"v=({player.vx:5.2f}, {player.vy:5.2f}), x=({player.x:6.2f}, {player.y:6.2f}",
         fill="red",
         anchor="nw",
         font=("Consolas", 12, "bold"),
@@ -209,14 +193,7 @@ def main_render():
 # ゲームの処理
 # -------------------------------------
 
-player_jump = False  # プレイヤーのジャンプが予定されているかどうかを表すフラグ
-player_move = 0  # プレイヤーの移動が予定されているかどうかを表し、その値は移動量
 G = 12  # 重力加速度（重力の強さ）
-PLAYER_MOVE_POWER = 200  # プレイヤーが移動する勢い
-PLAYER_JUMP_POWER = 400  # プレイヤーがジャンプする勢い
-COLLIDE_EPSILON = 1  # 物理演算で使う定数（物体をちょっと動かして衝突を見るときにどのくらい動かすか）
-COLLIDE_SOLVE_FACTOR = 0.002  # 物理演算で使う定数（めり込んだ衝突を解消するためにどのくらい動きを元に戻していくか）
-
 
 # 物体obj_movableから軸axis（"x"か"y"）に沿ってsign（-1か+1）の方向を見たときにほかの物体に接触していればその物体を返す
 # 接触していなければ何も返さない（Noneを返す）
@@ -251,31 +228,9 @@ def main_physics():
     t_delta = t_physics_cur - t_physics_pre
     t_physics_pre = t_physics_cur
 
-    # 接触判定を計算する
+    # 重力を与える
     for obj in iter_movable():  # すべての固定されていない物体に対して
-        obj.obstacle_on_surface[X_POS] = find_obstacle(obj, "x", +1)
-        obj.obstacle_on_surface[X_NEG] = find_obstacle(obj, "x", -1)
-        obj.obstacle_on_surface[Y_POS] = find_obstacle(obj, "y", +1)
-        obj.obstacle_on_surface[Y_NEG] = find_obstacle(obj, "y", -1)
-
-    # 床についていなかったら重力を与える
-    for obj in iter_movable():  # すべての固定されていない物体に対して
-        if not obj.obstacle_on_surface[Y_POS]:
-            obj.fy += obj.m * G  # ニュートンの運動方程式 F=ma
-
-    # プレイヤーアクションに従って移動力を与える
-    player = get_object_by_tag(tag="player")
-    if player.obstacle_on_surface[Y_POS]:  # 地面についているとき
-        if player_jump:  # ジャンプが予定されていたら
-            player.fy -= PLAYER_JUMP_POWER
-            player.vx *= 0.1  # 摩擦の処理が正確でないために空中で加速してしまうのを無理やり調整する
-        if player_move != 0:  # 移動が予定されていたら
-            player.fx += PLAYER_MOVE_POWER * player_move
-    else:  # 空中にいるとき
-        if player_move != 0:  # 移動が予定されていたら
-            player.fx += PLAYER_MOVE_POWER * player_move / abs(player_move) * 0.05  # 空中でもちょっと動ける
-    player_jump = False  # ジャンプの予定をクリア
-    player_move = 0  # 移動の予定をクリア
+        obj.fy += obj.m * G  # ニュートンの運動方程式 F=ma
 
     # 速度計算
     for obj_movable in iter_movable():  # すべての固定されていない物体に対して
@@ -288,45 +243,11 @@ def main_physics():
         obj_movable.vx += ax
         obj_movable.vy += ay
 
-        # ただし衝突する方向に進もうとしているときは速度をクリア
-        if obj_movable.obstacle_on_surface[X_POS] and obj_movable.vx > 0:
-            obj_movable.vx = 0
-        if obj_movable.obstacle_on_surface[X_NEG] and obj_movable.vx < 0:
-            obj_movable.vx = 0
-        if obj_movable.obstacle_on_surface[Y_POS] and obj_movable.vy > 0:
-            obj_movable.vy = 0
-        if obj_movable.obstacle_on_surface[Y_NEG] and obj_movable.vy < 0:
-            obj_movable.vy = 0
-
-    # 摩擦
-    for obj_movable in iter_movable():  # すべての固定されていない物体に対して
-        # X軸方向について接触があれば摩擦に応じて減速
-        obstacle = obj_movable.obstacle_on_surface[Y_POS] or obj_movable.obstacle_on_surface[Y_NEG]
-        if obstacle:
-            obj_movable.vx *= 1 - obstacle.friction_x
-        # Y軸方向について接触があれば摩擦に応じて減速
-        obstacle = obj_movable.obstacle_on_surface[X_POS] or obj_movable.obstacle_on_surface[X_NEG]
-        if obstacle:
-            obj_movable.vy *= 1 - obstacle.friction_y
-
     # 位置計算
     for obj_movable in iter_movable():  # すべての固定されていない物体に対して
         # 運動の法則 x = vt
         obj_movable.x += obj_movable.vx * t_delta
         obj_movable.y += obj_movable.vy * t_delta
-
-    # めり込み解決
-    #  今までの処理は衝突を考えていないので、固定されていない物体が進みすぎて固定物体にめり込んでいる可能性がある
-    #  ここでめり込んだ物体を衝突しなかったことになるまで少しずつ前に戻す
-    for obj_movable in iter_movable():  # すべての固定されていない物体に対して
-        for obj_fixed in iter_fixed():  # すべての固定されている物体に対して
-            if obj_fixed.tag == "bridge":  # 橋は下から貫通できるからめり込んでもいい
-                if obj_movable.vy <= 0:
-                    continue
-            while collide(obj_movable, obj_fixed):  # 衝突している間
-                # 物体を少し戻す
-                obj_movable.x -= obj_movable.vx * t_delta * COLLIDE_SOLVE_FACTOR
-                obj_movable.y -= obj_movable.vy * t_delta * COLLIDE_SOLVE_FACTOR
 
     # イベントループにこの処理を予約して繰り返す
     root.after(10, main_physics)
@@ -334,19 +255,13 @@ def main_physics():
 
 # メイン（キー処理）
 def main_key():
-    global player_jump, player_move
-
     def is_pressed(key):
         return ctypes.windll.user32.GetAsyncKeyState(key) & 0x8000
 
     if is_pressed(65):  # A
-        player_move = -1  # 左方向への移動を予定する
+        get_object_by_tag(tag="player").x -= 10
     if is_pressed(68):  # D
-        player_move = +1  # 右方向への移動を予定する
-    if is_pressed(32):  # Space
-        player_jump = True  # ジャンプを予定する
-    if is_pressed(16):  # Shift
-        player_move *= 1.8  # 予定された移動を大きくする（走る）
+        get_object_by_tag(tag="player").x += 10
     if is_pressed(27):  # Escape
         root.destroy()  # ゲーム終了
 
