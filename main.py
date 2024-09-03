@@ -1,17 +1,27 @@
 import copy
+import ctypes
 import time
 import tkinter
-import ctypes
 from dataclasses import dataclass, field
-import random
 
 
-# ---------------------
-# 物体の型Solidの定義
-# ---------------------
+# ------------------------------------------
+#  物体のデータ型の定義と関連する処理
+# ------------------------------------------
 
-# 物体を定義するSolidクラス
-# このSolidクラスを使って壁・床・キャラクターの物理演算を全部実現できる
+# ある物体から4方向の面がほかの物体に接触しているかどうかを管理するデータ型Contact
+@dataclass
+class Contact:
+    x_pos: "Solid | None" = None  # その物体から見てx軸プラス方向に接触している物体（接触している物体が無いならNone・初期値はNone）
+    x_neg: "Solid | None" = None  # x軸マイナス方向
+    y_pos: "Solid | None" = None  # y軸プラス方向
+    y_neg: "Solid | None" = None  # y軸マイナス方向
+
+
+# ちなみにposはポジティブ（プラス）のこと・negはネガティブ（マイナス）のこと
+
+# 物体を定義するデータ型Solid
+# このSolidクラスを使って壁・床・キャラクターの物理演算・描画のためのデータ管理をすべて実現する
 @dataclass
 class Solid:
     tag: str  # 物体につけるタグ（物体の検索に使う）
@@ -23,21 +33,32 @@ class Solid:
     color: str  # 色（現時点ではすべての物体は単色の四角形。画像を格納するフィールドを作れば画像も表示できるけどそれは後で考えようかな）
     vx: float = 0.0  # x速度
     vy: float = 0.0  # y速度
-    m: float = 1.0  # 質量
-    fx: float = 0.0  # x方向に加える力
-    fy: float = 0.0  # y方向に加える力
-    friction_x: float = 0.3  # 水平方向に擦れるときの摩擦 0が最大 1が摩擦なし
-    friction_y: float = 0.0  # 垂直方向に擦れるときの摩擦
-    obstacle_on_surface: list["None | Solid"] = field(
-        default_factory=lambda: [None, None, None, None],
-    )  # 物体中心から4方向の面が別の物体に接しているか 接して入ればその物体・接していなければNone
-    #    下の定数を使う(X_POS, X_NEG, Y_POS, Y_NEG)
-    #    obstacle_on_surface[X_POS]はx軸方向正の方向の接触物体を示す
+    contact: Contact = field(default_factory=Contact)  # 接触物体の記録用（初期値は毎回`Contact()`を実行して生成する）
 
 
-X_POS, X_NEG, Y_POS, Y_NEG = range(4)
+# ちなみに変数の定義の後のコロン「:」は「この変数にはこの型の値が入るよ」というヒントを書くPythonの機能
+# プログラムの動作上で特に意味はない、わかりやすいだけ
+# strは文字列・intは整数・floatは小数・自分で定義した型も書くことができてContactはさっき上で定義したデータ型
 
-# ステージ
+
+# 2つの物体が衝突しているかどうかを返す
+def collide(obj_1: Solid, obj_2: Solid):
+    x1 = obj_1.x + obj_1.w / 2
+    y1 = obj_1.y + obj_1.h / 2
+    w1 = obj_1.w
+    h1 = obj_1.h
+    x2 = obj_2.x + obj_2.w / 2
+    y2 = obj_2.y + obj_2.h / 2
+    w2 = obj_2.w
+    h2 = obj_2.h
+    return abs(x1 - x2) <= (w1 + w2) / 2 and abs(y1 - y2) <= (h1 + h2) / 2
+
+
+# ------------------------------------------
+#  ステージ
+# ------------------------------------------
+
+
 # 床：o 橋：- 空気：_
 # （橋は下から貫通できる床）
 STAGE = [
@@ -53,11 +74,11 @@ STAGE = [
     "___________________o",
     "____________________",
     "____________o----o__",
-    "____________________",
-    "____________________",
-    "__________o----o____",
-    "____________________",
-    "____________________",
+    "____-_______________",
+    "___-________________",
+    "__-_______o----o____",
+    "_-__________________",
+    "______o_____________",
     "ooo-----oooo-----ooo",  # 一番下はプレイヤーがスタートする床oが一つ以上必要
 ]
 # ランダム生成
@@ -67,15 +88,15 @@ STAGE = [
 #     for i in reversed(range(10))
 # ]
 
-# -------------------------------------
-# すべての物体を記憶するリストと関係する処理
-# -------------------------------------
+# ------------------------------------------
+#  すべての物体を記憶するリストと関連する処理
+# ------------------------------------------
 
 # すべての物体を記憶するリスト
-objects = []
+objects: list[Solid] = []  # Solid型の値のリスト
 
 
-# タグで物体を検索する
+# リストの中からタグで物体を検索する
 def get_object_by_tag(tag):
     for obj in objects:
         if obj.tag == tag:
@@ -83,38 +104,25 @@ def get_object_by_tag(tag):
     raise ValueError(f"タグ\"{tag}\"を持つ物体が見つかりません")
 
 
-# 固定された物体を繰り返す
+# リストの中から固定された物体（fixed=True）を繰り返す
 def iter_fixed():
     for obj in objects:
         if obj.fixed:
             yield obj
 
 
-# 固定されていない物体を繰り返す
+# リストの中から固定されていない物体（fixed=False）を繰り返す
 def iter_movable():
     for obj in objects:
         if not obj.fixed:
             yield obj
 
 
-# 2つの物体が衝突しているかどうかを返す
-def collide(obj_1: Solid, obj_2: Solid):
-    x1 = obj_1.x + obj_1.w / 2
-    y1 = obj_1.y + obj_1.h / 2
-    w1 = obj_1.w
-    h1 = obj_1.h
-    x2 = obj_2.x + obj_2.w / 2
-    y2 = obj_2.y + obj_2.h / 2
-    w2 = obj_2.w
-    h2 = obj_2.h
-    return abs(x1 - x2) < (w1 + w2) / 2 and abs(y1 - y2) < (h1 + h2) / 2
+# ------------------------------------------
+#  物体の初期化
+# ------------------------------------------
 
-
-# -------------------------------------
-# 物体の初期化
-# -------------------------------------
-
-BLOCK_SIZE = 30  # 床ブロックの大きさ
+BLOCK_SIZE = 30  # 床ブロックの大きさ（ピクセル）
 
 # プレイヤーを作って追加
 objects.append(
@@ -131,11 +139,11 @@ objects.append(
 
 # すべての床・橋をそれぞれ作って追加
 # +--------->
-# |       j
+# |       j列目
 # |
 # |  STAGE
 # |
-# | i
+# | i行目
 # v
 for i in range(len(STAGE)):  # STAGEのi行目
     for j in range(len(STAGE[i])):  # STAGEのj列目
@@ -164,195 +172,212 @@ for i in range(len(STAGE)):  # STAGEのi行目
                 )
             )
 
+# ------------------------------------------
+#  描画処理
+# ------------------------------------------
 
-# -------------------------------------
-# 描画処理
-# -------------------------------------
+FPS = 60  # 描画の最大フレームレート
+
 
 # メイン（描画処理）
 def main_render():
+    # 描画にかかった時間を知るために描画開始時刻を記録する
+    t_start = time.time()
+
+    # すべて消す
     cvs.delete("all")
 
     # プレイヤーの位置に応じて画面を動かすときに使う座標データの生成
-    player = get_object_by_tag(tag="player")  # プレイヤーを取得
+    player = get_object_by_tag(tag="player")  # プレイヤーのタグを持つ物体を取得
     screen_x = player.x - 300  # 座標データを生成（下で使う）
     screen_y = player.y - 300  # 座標データを生成（下で使う）
 
-    # すべての物体を位置x,yと幅wと高さhと色colorに基づいて描画
+    # すべての物体を位置x,y・サイズw,h・色colorに基づいて描画
     for obj in objects:
         cvs.create_rectangle(
             obj.x - screen_x,
             obj.y - screen_y,
             obj.x + obj.w - screen_x,
             obj.y + obj.h - screen_y,
-            fill=obj.color,
+            outline=obj.color,
+            fill="",
         )
 
     # 画面の上にデバッグ情報を表示
-    # draw player's geometry on canvas
-    player = get_object_by_tag(tag="player")
-    obs = list(map(int, map(bool, player.obstacle_on_surface)))
+    player = get_object_by_tag(tag="player")  # プレイヤーのタグを持つ物体を取得
+    contact = "".join([  # 接触を文字列で表示するために接触方向を矢印で表した文字列を作る
+        "<" if player.contact.x_neg else "-",
+        "^" if player.contact.y_neg else "-",
+        "v" if player.contact.y_pos else "-",
+        ">" if player.contact.x_pos else "-",
+    ])
     cvs.create_text(
         10,
         0,
-        text=f"v=({player.vx:5.2f}, {player.vy:5.2f}), x=({player.x:6.2f}, {player.y:6.2f}), jump={player_jump}, move={player_move}, surface={obs}",
+        text=", ".join([
+            f"v=({player.vx:+7.2f}, {player.vy:+7.2f})",
+            f"x=({player.x:+6.2f}, {player.y:+6.2f})",
+            f"jump={jump_flag}",
+            f"move={move_flag}",
+            f"contact={contact}",
+        ]),
         fill="red",
-        anchor="nw",
-        font=("Consolas", 12, "bold"),
+        anchor="nw",  # テキストの配置位置は左上の角（North West）を基準にする
+        font=("Consolas", 11, "bold"),  # きれいな等幅フォントで有名なConsolas・フォントサイズ11・太字
     )
 
+    # 描画にかかった時間を知るために描画開始時刻を記録する
+    t_end = time.time()
+
     # イベントループにこの処理を予約して繰り返す
-    root.after(33, main_render)
+    t_delta = t_end - t_start  # 処理にかかった時間（秒）
+    t_rest = 1 // FPS - t_delta  # 1 / FPS 秒間隔で描画するために次の描画を待つ時間（秒）
+    root.after(max(1, int(t_rest * 1000)), main_render)  # root.afterでt_rest秒後に描画を予約
+    # max(1, ...): 処理が重くてt_restがほぼ0やマイナスの時でも最低1ミリ秒は待つ
 
 
-# -------------------------------------
-# ゲームの処理
-# -------------------------------------
+# ------------------------------------------
+#  物理演算
+# ------------------------------------------
 
-player_jump = False  # プレイヤーのジャンプが予定されているかどうかを表すフラグ
-player_move = 0  # プレイヤーの移動が予定されているかどうかを表し、その値は移動量
-G = 12  # 重力加速度（重力の強さ）
-PLAYER_MOVE_POWER = 200  # プレイヤーが移動する勢い
-PLAYER_JUMP_POWER = 400  # プレイヤーがジャンプする勢い
-COLLIDE_EPSILON = 1  # 物理演算で使う定数（物体をちょっと動かして衝突を見るときにどのくらい動かすか）
-COLLIDE_SOLVE_FACTOR = 0.002  # 物理演算で使う定数（めり込んだ衝突を解消するためにどのくらい動きを元に戻していくか）
+move_flag = 0  # プレイヤーの移動が予定されているかどうかを表すフラグ、ただしその値は予定する移動の勢いを表す数値
+jump_flag = False  # プレイヤーのジャンプが予定されているかどうかを表すフラグ
+G = 900  # 重力加速度（重力の強さ）
+MOVE_VEL = 100  # プレイヤーが移動する速さ
+JUMP_VEL = 450  # プレイヤーがジャンプする瞬間に加える速さ
+COLLIDE_EPS = 1  # 物理演算で使う定数（物体をちょっと動かして衝突を見るときにどのくらい動かすか）
+COLLIDE_SOLVE_FACTOR = 0.01  # 物理演算で使う定数（めり込んだ衝突を解消するためにどのくらい動きを元に戻していくか）
 
 
 # 物体obj_movableから軸axis（"x"か"y"）に沿ってsign（-1か+1）の方向を見たときにほかの物体に接触していればその物体を返す
+# 物体がほかの物体の面に接しsているかを調べる
+# 物体objから(dx,dy)方向に見てほかの物体に接触していればその物体を返す
 # 接触していなければ何も返さない（Noneを返す）
-def find_obstacle(obj_movable, axis, sign):
+# dxとdyは-1,0,+1のどれかを指定する
+def find_obstacle(obj, dx, dy):
     # 物体obj_movableのコピーを作る
-    obj_movable_copy = copy.deepcopy(obj_movable)
-    # obj_movableを軸axisに沿ってsignの方向にちょっと動かしてみる
-    setattr(
-        obj_movable_copy,
-        f"{axis}",
-        getattr(obj_movable_copy, f"{axis}") + sign * COLLIDE_EPSILON,
-    )
-    # 何かにぶつかったらぶつかった物体を返す
+    obj_copy = copy.copy(obj)
+    # obj_movableを(dx, dy)方向にちょっと（COLLIDE_EPSだけ）動かしてみる
+    obj_copy.x += dx * COLLIDE_EPS
+    obj_copy.y += dy * COLLIDE_EPS
+    # すべての固定された物体に対して
     for obj_fixed in iter_fixed():
         # 橋は物体が下から突っ込んだとき（移動方向が上向きのとき）は貫通できるので衝突に含めない
-        if obj_fixed.tag == "bridge" and obj_movable.vy < 0:
+        if obj_fixed.tag == "bridge" and obj.vy < 0:
             continue
         # 今までぶつかっていなかったのにちょっと動かしてみたらぶつかったときは衝突と判断して衝突相手の物体を返す
-        if not collide(obj_movable, obj_fixed) and collide(obj_movable_copy, obj_fixed):
+        if not collide(obj, obj_fixed) and collide(obj_copy, obj_fixed):
             return obj_fixed
 
 
-t_physics_pre = time.time()  # 物理演算で使うタイマー変数
+t_physics = time.time()  # 物理演算で使うタイマー変数
 
 
 # メイン（物理演算）
 def main_physics():
-    global player_jump, player_move, t_physics_pre
+    global jump_flag, move_flag, t_physics
 
-    # t_physics_preを使って現在のループと前のループの時刻差を出す
-    t_physics_cur = time.time()
-    t_delta = t_physics_cur - t_physics_pre
-    t_physics_pre = t_physics_cur
+    # t_physicsを使って現在のループと前のループの時刻差t_deltaを出す
+    t_now = time.time()
+    t_delta = t_now - t_physics
+    t_physics = t_now
 
     # 接触判定を計算する
     for obj in iter_movable():  # すべての固定されていない物体に対して
-        obj.obstacle_on_surface[X_POS] = find_obstacle(obj, "x", +1)
-        obj.obstacle_on_surface[X_NEG] = find_obstacle(obj, "x", -1)
-        obj.obstacle_on_surface[Y_POS] = find_obstacle(obj, "y", +1)
-        obj.obstacle_on_surface[Y_NEG] = find_obstacle(obj, "y", -1)
+        obj.contact.x_pos = find_obstacle(obj, +1, 0)
+        obj.contact.x_neg = find_obstacle(obj, -1, 0)
+        obj.contact.y_pos = find_obstacle(obj, 0, +1)
+        obj.contact.y_neg = find_obstacle(obj, 0, -1)
 
     # 床についていなかったら重力を与える
     for obj in iter_movable():  # すべての固定されていない物体に対して
-        if not obj.obstacle_on_surface[Y_POS]:
-            obj.fy += obj.m * G  # ニュートンの運動方程式 F=ma
+        if not obj.contact.y_pos:
+            obj.vy += G * t_delta
 
-    # プレイヤーアクションに従って移動力を与える
-    player = get_object_by_tag(tag="player")
-    if player.obstacle_on_surface[Y_POS]:  # 地面についているとき
-        if player_jump:  # ジャンプが予定されていたら
-            player.fy -= PLAYER_JUMP_POWER
-            player.vx *= 0.1  # 摩擦の処理が正確でないために空中で加速してしまうのを無理やり調整する
-        if player_move != 0:  # 移動が予定されていたら
-            player.fx += PLAYER_MOVE_POWER * player_move
+    # 速度編集：プレイヤーアクションに従って速度を与える
+    player = get_object_by_tag(tag="player")  # プレイヤーのタグがついた物体を取得
+    if player.contact.y_pos:  # 地面についているとき
+        if jump_flag:  # ジャンプが予定されていたら
+            player.vy -= JUMP_VEL
+        if move_flag != 0:  # 移動が予定されていたら
+            vel = MOVE_VEL * move_flag
+            if player.vx * vel <= 0 or abs(player.vx) < abs(vel):  # 移動方向が変わるときもしくは移動速度に達していないとき
+                player.vx = vel
+        else:  # 移動が予定されていなかったら
+            player.vx *= 0.1  # 減速する
     else:  # 空中にいるとき
-        if player_move != 0:  # 移動が予定されていたら
-            player.fx += PLAYER_MOVE_POWER * player_move / abs(player_move) * 0.05  # 空中でもちょっと動ける
-    player_jump = False  # ジャンプの予定をクリア
-    player_move = 0  # 移動の予定をクリア
+        if move_flag != 0:  # 移動が予定されていたら
+            vel = MOVE_VEL * move_flag * 0.3  # 空中でもちょっと動ける
+            if player.vx * vel <= 0 or abs(player.vx) < abs(vel):
+                player.vx = vel
 
-    # 速度計算
-    for obj_movable in iter_movable():  # すべての固定されていない物体に対して
-        # ニュートンの運動方程式 F = ma から a を逆算
-        ax = obj_movable.fx / obj_movable.m
-        ay = obj_movable.fy / obj_movable.m
-        obj_movable.fx = obj_movable.fy = 0  # 撃力をクリア
-
-        # 速度を加速度にしたがって加速
-        obj_movable.vx += ax
-        obj_movable.vy += ay
-
-        # ただし衝突する方向に進もうとしているときは速度をクリア
-        if obj_movable.obstacle_on_surface[X_POS] and obj_movable.vx > 0:
-            obj_movable.vx = 0
-        if obj_movable.obstacle_on_surface[X_NEG] and obj_movable.vx < 0:
-            obj_movable.vx = 0
-        if obj_movable.obstacle_on_surface[Y_POS] and obj_movable.vy > 0:
-            obj_movable.vy = 0
-        if obj_movable.obstacle_on_surface[Y_NEG] and obj_movable.vy < 0:
-            obj_movable.vy = 0
-
-    # 摩擦
-    for obj_movable in iter_movable():  # すべての固定されていない物体に対して
-        # X軸方向について接触があれば摩擦に応じて減速
-        obstacle = obj_movable.obstacle_on_surface[Y_POS] or obj_movable.obstacle_on_surface[Y_NEG]
-        if obstacle:
-            obj_movable.vx *= 1 - obstacle.friction_x
-        # Y軸方向について接触があれば摩擦に応じて減速
-        obstacle = obj_movable.obstacle_on_surface[X_POS] or obj_movable.obstacle_on_surface[X_NEG]
-        if obstacle:
-            obj_movable.vy *= 1 - obstacle.friction_y
+    # 速度補正
+    for obj in iter_movable():  # すべての固定されていない物体に対して
+        if obj.contact.x_pos and obj.vx > 0:
+            obj.vx = 0
+        if obj.contact.x_neg and obj.vx < 0:
+            obj.vx = 0
+        if obj.contact.y_pos and obj.vy > 0:
+            obj.vy = 0
+        if obj.contact.y_neg and obj.vy < 0:
+            obj.vy = 0
 
     # 位置計算
-    for obj_movable in iter_movable():  # すべての固定されていない物体に対して
-        # 運動の法則 x = vt
-        obj_movable.x += obj_movable.vx * t_delta
-        obj_movable.y += obj_movable.vy * t_delta
+    for obj in iter_movable():  # すべての固定されていない物体に対して
+        # 運動前の物体のコピーを保存
+        obj_prev = copy.copy(obj)
 
-    # めり込み解決
-    #  今までの処理は衝突を考えていないので、固定されていない物体が進みすぎて固定物体にめり込んでいる可能性がある
-    #  ここでめり込んだ物体を衝突しなかったことになるまで少しずつ前に戻す
-    for obj_movable in iter_movable():  # すべての固定されていない物体に対して
+        # 運動の法則 x = vt を適用
+        obj.x += obj.vx * t_delta
+        obj.y += obj.vy * t_delta
+
+        # めり込み解決
+        #  物体が進みすぎて固定物体にめり込んでいる可能性がある
+        #  ここでめり込んだ物体を少しずつ前に戻して衝突を無かったことにする
         for obj_fixed in iter_fixed():  # すべての固定されている物体に対して
             if obj_fixed.tag == "bridge":  # 橋は下から貫通できるからめり込んでもいい
-                if obj_movable.vy <= 0:
+                if obj.vy <= 0:
                     continue
-            while collide(obj_movable, obj_fixed):  # 衝突している間
-                # 物体を少し戻す
-                obj_movable.x -= obj_movable.vx * t_delta * COLLIDE_SOLVE_FACTOR
-                obj_movable.y -= obj_movable.vy * t_delta * COLLIDE_SOLVE_FACTOR
+            if not collide(obj_prev, obj_fixed) and collide(obj,
+                                                            obj_fixed):  # 運動前は衝突してなかったけど運動後に衝突したら
+                while collide(obj, obj_fixed):  # 衝突している間
+                    # 物体の運動を少しずつ巻き戻す
+                    obj.x -= obj.vx * t_delta * COLLIDE_SOLVE_FACTOR
+                    obj.y -= obj.vy * t_delta * COLLIDE_SOLVE_FACTOR
 
     # イベントループにこの処理を予約して繰り返す
-    root.after(10, main_physics)
+    root.after(20, main_physics)
 
 
-# メイン（キー処理）
+# ------------------------------------------
+#  キー入力処理
+# ------------------------------------------
+
+# メイン（キー入力処理）
 def main_key():
-    global player_jump, player_move
+    global jump_flag, move_flag
 
     def is_pressed(key):
         return ctypes.windll.user32.GetAsyncKeyState(key) & 0x8000
 
+    move_flag = 0  # いったん移動の予定フラグをクリア
+    jump_flag = False  # いったんジャンプの予定フラグをクリア
     if is_pressed(65):  # A
-        player_move = -1  # 左方向への移動を予定する
+        move_flag = -1  # 左方向への移動を予定する
     if is_pressed(68):  # D
-        player_move = +1  # 右方向への移動を予定する
+        move_flag = +1  # 右方向への移動を予定する
     if is_pressed(32):  # Space
-        player_jump = True  # ジャンプを予定する
+        jump_flag = True  # ジャンプを予定する
     if is_pressed(16):  # Shift
-        player_move *= 1.8  # 予定された移動を大きくする（走る）
-    if is_pressed(27):  # Escape
-        root.destroy()  # ゲーム終了
+        move_flag *= 2  # 予定された移動を大きくする（走る）
 
     # イベントループにこの処理を予約して繰り返す
     root.after(50, main_key)
 
+
+# ------------------------------------------
+#  起動処理
+# ------------------------------------------
 
 root = tkinter.Tk()
 cvs = tkinter.Canvas(root, bg="white", height=650, width=800)
