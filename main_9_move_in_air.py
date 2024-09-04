@@ -81,12 +81,6 @@ STAGE = [
     "______o_____________",
     "ooo-----oooo-----ooo",  # 一番下はプレイヤーがスタートする床oが一つ以上必要
 ]
-# ランダム生成
-# STAGE = [
-#     "".join(random.choices("_oo--", k=10))
-#     if i % 3 == 0 else "_" * 10
-#     for i in reversed(range(10))
-# ]
 
 # ------------------------------------------
 #  すべての物体を記憶するリストと関連する処理
@@ -255,7 +249,7 @@ COLLIDE_SOLVE_FACTOR = 0.01  # 物理演算で使う定数（めり込んだ衝�
 # 物体objから(dx,dy)方向に見てほかの物体に接触していればその物体を返す
 # 接触していなければ何も返さない（Noneを返す）
 # dxとdyは-1,0,+1のどれかを指定する
-def find_contact_object(obj, dx, dy):
+def find_obstacle(obj, dx, dy):
     # 物体obj_movableのコピーを作る
     obj_copy = copy.copy(obj)
     # obj_movableを(dx, dy)方向にちょっと（COLLIDE_EPSだけ）動かしてみる
@@ -263,9 +257,6 @@ def find_contact_object(obj, dx, dy):
     obj_copy.y += dy * COLLIDE_EPS
     # すべての固定された物体に対して
     for obj_fixed in iter_fixed():
-        # 橋は物体が下から突っ込んだとき（移動方向が上向きのとき）は貫通している途中なので接触に含めない
-        if obj_fixed.tag == "bridge" and obj.vy < 0:
-            continue
         # 今までぶつかっていなかったのにちょっと動かしてみたらぶつかったときは衝突と判断して衝突相手の物体を返す
         if not collide(obj, obj_fixed) and collide(obj_copy, obj_fixed):
             return obj_fixed
@@ -285,10 +276,10 @@ def main_physics():
 
     # 接触判定を計算する
     for obj in iter_movable():  # すべての固定されていない物体に対して
-        obj.contact.x_pos = find_contact_object(obj, +1, 0)
-        obj.contact.x_neg = find_contact_object(obj, -1, 0)
-        obj.contact.y_pos = find_contact_object(obj, 0, +1)
-        obj.contact.y_neg = find_contact_object(obj, 0, -1)
+        obj.contact.x_pos = find_obstacle(obj, +1, 0)
+        obj.contact.x_neg = find_obstacle(obj, -1, 0)
+        obj.contact.y_pos = find_obstacle(obj, 0, +1)
+        obj.contact.y_neg = find_obstacle(obj, 0, -1)
 
     # 床についていなかったら重力を与える
     for obj in iter_movable():  # すべての固定されていない物体に対して
@@ -336,9 +327,6 @@ def main_physics():
         #  物体が進みすぎて固定物体にめり込んでいる可能性がある
         #  ここでめり込んだ物体を少しずつ前に戻して衝突を無かったことにする
         for obj_fixed in iter_fixed():  # すべての固定されている物体に対して
-            if obj_fixed.tag == "bridge":  # 橋は下から貫通できるからめり込んでもいい
-                if obj.vy <= 0:
-                    continue
             if not collide(obj_prev, obj_fixed) and collide(obj, obj_fixed):
                 # ↑ 運動前は衝突してなかったけど運動後に衝突したら
                 while collide(obj, obj_fixed):  # 衝突している間

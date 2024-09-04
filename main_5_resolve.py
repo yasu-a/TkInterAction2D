@@ -1,13 +1,24 @@
+import copy
 import ctypes
 import time
 import tkinter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 # ------------------------------------------
 #  物体のデータ型の定義と関連する処理
 # ------------------------------------------
 
+# ある物体から4方向の面がほかの物体に接触しているかどうかを管理するデータ型Contact
+@dataclass
+class Contact:
+    x_pos: "Solid | None" = None  # その物体から見てx軸プラス方向に接触している物体（接触している物体が無いならNone・初期値はNone）
+    x_neg: "Solid | None" = None  # x軸マイナス方向
+    y_pos: "Solid | None" = None  # y軸プラス方向
+    y_neg: "Solid | None" = None  # y軸マイナス方向
+
+
+# ちなみにposはポジティブ（プラス）のこと・negはネガティブ（マイナス）のこと
 
 # 物体を定義するデータ型Solid
 # このSolidクラスを使って壁・床・キャラクターの物理演算・描画のためのデータ管理をすべて実現する
@@ -18,12 +29,29 @@ class Solid:
     y: float  # y座標
     w: float  # 幅
     h: float  # 高さ
+    fixed: bool  # 動かない物体ならTrue
     color: str  # 色（現時点ではすべての物体は単色の四角形。画像を格納するフィールドを作れば画像も表示できるけどそれは後で考えようかな）
+    vx: float = 0.0  # x速度
+    vy: float = 0.0  # y速度
+    contact: Contact = field(default_factory=Contact)  # 接触物体の記録用（初期値は毎回`Contact()`を実行して生成する）
 
 
 # ちなみに変数の定義の後のコロン「:」は「この変数にはこの型の値が入るよ」というヒントを書くPythonの機能
 # プログラムの動作上で特に意味はない、わかりやすいだけ
 # strは文字列・intは整数・floatは小数・自分で定義した型も書くことができてContactはさっき上で定義したデータ型
+
+
+# 2つの物体が衝突しているかどうかを返す
+def collide(obj_1: Solid, obj_2: Solid):
+    x1 = obj_1.x + obj_1.w / 2
+    y1 = obj_1.y + obj_1.h / 2
+    w1 = obj_1.w
+    h1 = obj_1.h
+    x2 = obj_2.x + obj_2.w / 2
+    y2 = obj_2.y + obj_2.h / 2
+    w2 = obj_2.w
+    h2 = obj_2.h
+    return abs(x1 - x2) <= (w1 + w2) / 2 and abs(y1 - y2) <= (h1 + h2) / 2
 
 
 # ------------------------------------------
@@ -70,6 +98,20 @@ def get_object_by_tag(tag):
     raise ValueError(f"タグ\"{tag}\"を持つ物体が見つかりません")
 
 
+# リストの中から固定された物体（fixed=True）を繰り返す
+def iter_fixed():
+    for obj in objects:
+        if obj.fixed:
+            yield obj
+
+
+# リストの中から固定されていない物体（fixed=False）を繰り返す
+def iter_movable():
+    for obj in objects:
+        if not obj.fixed:
+            yield obj
+
+
 # ------------------------------------------
 #  物体の初期化
 # ------------------------------------------
@@ -84,6 +126,7 @@ objects.append(
         y=(len(STAGE) - 3) * BLOCK_SIZE + BLOCK_SIZE / 2,  # スタート時のy座標はステージの一番下の床の上
         w=BLOCK_SIZE * 0.3,
         h=BLOCK_SIZE * 0.7,
+        fixed=False,  # プレイヤーは動く（固定オブジェクトではない）
         color="red",  # 赤色で表示
     )
 )
@@ -106,6 +149,7 @@ for i in range(len(STAGE)):  # STAGEのi行目
                     y=i * BLOCK_SIZE,
                     w=BLOCK_SIZE,
                     h=BLOCK_SIZE,
+                    fixed=True,  # 床は固定オブジェクト
                     color="black",
                 )
             )
@@ -117,6 +161,7 @@ for i in range(len(STAGE)):  # STAGEのi行目
                     y=i * BLOCK_SIZE,
                     w=BLOCK_SIZE,
                     h=BLOCK_SIZE * 0.1,
+                    fixed=True,  # 橋は固定オブジェクト
                     color="black",
                 )
             )
@@ -136,24 +181,37 @@ def main_render():
     # すべて消す
     cvs.delete("all")
 
+    # プレイヤーの位置に応じて画面を動かすときに使う座標データの生成
+    player = get_object_by_tag(tag="player")  # プレイヤーのタグを持つ物体を取得
+    screen_x = player.x - 300  # 座標データを生成（下で使う）
+    screen_y = player.y - 300  # 座標データを生成（下で使う）
+
     # すべての物体を位置x,y・サイズw,h・色colorに基づいて描画
     for obj in objects:
         cvs.create_rectangle(
-            obj.x,
-            obj.y,
-            obj.x + obj.w,
-            obj.y + obj.h,
+            obj.x - screen_x,
+            obj.y - screen_y,
+            obj.x + obj.w - screen_x,
+            obj.y + obj.h - screen_y,
             outline=obj.color,
             fill="",
         )
 
     # 画面の上にデバッグ情報を表示
     player = get_object_by_tag(tag="player")  # プレイヤーのタグを持つ物体を取得
+    contact = "".join([  # 接触を文字列で表示するために接触方向を矢印で表した文字列を作る
+        "<" if player.contact.x_neg else "-",
+        "^" if player.contact.y_neg else "-",
+        "v" if player.contact.y_pos else "-",
+        ">" if player.contact.x_pos else "-",
+    ])
     cvs.create_text(
         10,
         0,
         text=", ".join([
+            f"v=({player.vx:+7.2f}, {player.vy:+7.2f})",
             f"x=({player.x:+6.2f}, {player.y:+6.2f})",
+            f"contact={contact}",
         ]),
         fill="red",
         anchor="nw",  # テキストの配置位置は左上の角（North West）を基準にする
@@ -174,9 +232,84 @@ def main_render():
 #  物理演算
 # ------------------------------------------
 
+G = 900  # 重力加速度（重力の強さ）
+COLLIDE_EPS = 1  # 物理演算で使う定数（物体をちょっと動かして衝突を見るときにどのくらい動かすか）
+COLLIDE_SOLVE_FACTOR = 0.01  # 物理演算で使う定数（めり込んだ衝突を解消するためにどのくらい動きを元に戻していくか）
+
+
+# 物体obj_movableから軸axis（"x"か"y"）に沿ってsign（-1か+1）の方向を見たときにほかの物体に接触していればその物体を返す
+# 物体がほかの物体の面に接しsているかを調べる
+# 物体objから(dx,dy)方向に見てほかの物体に接触していればその物体を返す
+# 接触していなければ何も返さない（Noneを返す）
+# dxとdyは-1,0,+1のどれかを指定する
+def find_obstacle(obj, dx, dy):
+    # 物体obj_movableのコピーを作る
+    obj_copy = copy.copy(obj)
+    # obj_movableを(dx, dy)方向にちょっと（COLLIDE_EPSだけ）動かしてみる
+    obj_copy.x += dx * COLLIDE_EPS
+    obj_copy.y += dy * COLLIDE_EPS
+    # すべての固定された物体に対して
+    for obj_fixed in iter_fixed():
+        # 今までぶつかっていなかったのにちょっと動かしてみたらぶつかったときは衝突と判断して衝突相手の物体を返す
+        if not collide(obj, obj_fixed) and collide(obj_copy, obj_fixed):
+            return obj_fixed
+
+
+t_physics = time.time()  # 物理演算で使うタイマー変数
+
 
 # メイン（物理演算）
 def main_physics():
+    global jump_flag, move_flag, t_physics
+
+    # t_physicsを使って現在のループと前のループの時刻差t_deltaを出す
+    t_now = time.time()
+    t_delta = t_now - t_physics
+    t_physics = t_now
+
+    # 接触判定を計算する
+    for obj in iter_movable():  # すべての固定されていない物体に対して
+        obj.contact.x_pos = find_obstacle(obj, +1, 0)
+        obj.contact.x_neg = find_obstacle(obj, -1, 0)
+        obj.contact.y_pos = find_obstacle(obj, 0, +1)
+        obj.contact.y_neg = find_obstacle(obj, 0, -1)
+
+    # 床についていなかったら重力を与える
+    for obj in iter_movable():  # すべての固定されていない物体に対して
+        if not obj.contact.y_pos:
+            obj.vy += G * t_delta
+
+    # 速度補正：ほかの物体と接触している方向に移動する速度は0にする
+    for obj in iter_movable():  # すべての固定されていない物体に対して
+        if obj.contact.x_pos and obj.vx > 0:  # x軸プラス方向
+            obj.vx = 0
+        if obj.contact.x_neg and obj.vx < 0:  # x軸マイナス方向
+            obj.vx = 0
+        if obj.contact.y_pos and obj.vy > 0:  # y軸プラス方向
+            obj.vy = 0
+        if obj.contact.y_neg and obj.vy < 0:  # y軸マイナス方向
+            obj.vy = 0
+
+    # 位置計算
+    for obj in iter_movable():  # すべての固定されていない物体に対して
+        # 運動前の物体のコピーを保存
+        obj_prev = copy.copy(obj)
+
+        # 運動の法則 x = vt を適用
+        obj.x += obj.vx * t_delta
+        obj.y += obj.vy * t_delta
+
+        # めり込み解決
+        #  物体が進みすぎて固定物体にめり込んでいる可能性がある
+        #  ここでめり込んだ物体を少しずつ前に戻して衝突を無かったことにする
+        for obj_fixed in iter_fixed():  # すべての固定されている物体に対して
+            if not collide(obj_prev, obj_fixed) and collide(obj, obj_fixed):
+                # ↑ 運動前は衝突してなかったけど運動後に衝突したら
+                while collide(obj, obj_fixed):  # 衝突している間
+                    # 物体の運動を少しずつ巻き戻す
+                    obj.x -= obj.vx * t_delta * COLLIDE_SOLVE_FACTOR
+                    obj.y -= obj.vy * t_delta * COLLIDE_SOLVE_FACTOR
+
     # イベントループにこの処理を予約して繰り返す
     root.after(20, main_physics)
 

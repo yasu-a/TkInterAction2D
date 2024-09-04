@@ -59,7 +59,7 @@ def collide(obj_1: Solid, obj_2: Solid):
 # ------------------------------------------
 
 
-# 床：o 橋：- 空気：_
+# 床：o 橋：- 空気：_ m: 動くブロック
 # （橋は下から貫通できる床）
 STAGE = [
     "_________________o-o",
@@ -78,15 +78,9 @@ STAGE = [
     "___-________________",
     "__-_______o----o____",
     "_-__________________",
-    "______o_____________",
+    "______m_____________",
     "ooo-----oooo-----ooo",  # 一番下はプレイヤーがスタートする床oが一つ以上必要
 ]
-# ランダム生成
-# STAGE = [
-#     "".join(random.choices("_oo--", k=10))
-#     if i % 3 == 0 else "_" * 10
-#     for i in reversed(range(10))
-# ]
 
 # ------------------------------------------
 #  すべての物体を記憶するリストと関連する処理
@@ -102,6 +96,13 @@ def get_object_by_tag(tag):
         if obj.tag == tag:
             return obj
     raise ValueError(f"タグ\"{tag}\"を持つ物体が見つかりません")
+
+
+# リストの中からタグで物体を検索して全て繰り返す
+def iter_objects_by_tag(tag):
+    for obj in objects:
+        if obj.tag == tag:
+            yield obj
 
 
 # リストの中から固定された物体（fixed=True）を繰り返す
@@ -169,6 +170,18 @@ for i in range(len(STAGE)):  # STAGEのi行目
                     h=BLOCK_SIZE * 0.1,
                     fixed=True,  # 橋は固定オブジェクト
                     color="black",
+                )
+            )
+        if STAGE[i][j] == "m":  # 動くブロック
+            objects.append(
+                Solid(
+                    tag=f"block_m",  # タグはmovable_block
+                    x=j * BLOCK_SIZE,
+                    y=i * BLOCK_SIZE,
+                    w=BLOCK_SIZE,
+                    h=BLOCK_SIZE,
+                    fixed=True,  # 動くブロックは固定オブジェクト（重力や衝突の影響を受けないから）
+                    color="green",
                 )
             )
 
@@ -282,6 +295,9 @@ def main_physics():
     t_now = time.time()
     t_delta = t_now - t_physics
     t_physics = t_now
+
+    for obj in iter_objects_by_tag(tag="block_m"):
+        obj.x -= 1 * t_delta
 
     # 接触判定を計算する
     for obj in iter_movable():  # すべての固定されていない物体に対して

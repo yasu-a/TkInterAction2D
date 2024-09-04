@@ -136,13 +136,18 @@ def main_render():
     # すべて消す
     cvs.delete("all")
 
+    # プレイヤーの位置に応じて画面を動かすときに使う座標データの生成
+    player = get_object_by_tag(tag="player")  # プレイヤーのタグを持つ物体を取得
+    screen_x = player.x - 300  # 座標データを生成（下で使う）
+    screen_y = player.y - 300  # 座標データを生成（下で使う）
+
     # すべての物体を位置x,y・サイズw,h・色colorに基づいて描画
     for obj in objects:
         cvs.create_rectangle(
-            obj.x,
-            obj.y,
-            obj.x + obj.w,
-            obj.y + obj.h,
+            obj.x - screen_x,
+            obj.y - screen_y,
+            obj.x + obj.w - screen_x,
+            obj.y + obj.h - screen_y,
             outline=obj.color,
             fill="",
         )

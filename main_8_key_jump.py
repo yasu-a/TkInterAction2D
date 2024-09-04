@@ -81,12 +81,6 @@ STAGE = [
     "______o_____________",
     "ooo-----oooo-----ooo",  # 一番下はプレイヤーがスタートする床oが一つ以上必要
 ]
-# ランダム生成
-# STAGE = [
-#     "".join(random.choices("_oo--", k=10))
-#     if i % 3 == 0 else "_" * 10
-#     for i in reversed(range(10))
-# ]
 
 # ------------------------------------------
 #  すべての物体を記憶するリストと関連する処理
@@ -245,7 +239,6 @@ jump_flag = False  # プレイヤーのジャンプが予定されているか�
 G = 900  # 重力加速度（重力の強さ）
 MOVE_VEL = 100  # プレイヤーが移動する速さ
 JUMP_VEL = 450  # プレイヤーがジャンプする瞬間に加える速さ
-MOVE_VEL_FACTOR_AIR = 0.3  # プレイヤーが空中で移動する速さは地上の何倍かを表す
 COLLIDE_EPS = 1  # 物理演算で使う定数（物体をちょっと動かして衝突を見るときにどのくらい動かすか）
 COLLIDE_SOLVE_FACTOR = 0.01  # 物理演算で使う定数（めり込んだ衝突を解消するためにどのくらい動きを元に戻していくか）
 
@@ -255,7 +248,7 @@ COLLIDE_SOLVE_FACTOR = 0.01  # 物理演算で使う定数（めり込んだ衝�
 # 物体objから(dx,dy)方向に見てほかの物体に接触していればその物体を返す
 # 接触していなければ何も返さない（Noneを返す）
 # dxとdyは-1,0,+1のどれかを指定する
-def find_contact_object(obj, dx, dy):
+def find_obstacle(obj, dx, dy):
     # 物体obj_movableのコピーを作る
     obj_copy = copy.copy(obj)
     # obj_movableを(dx, dy)方向にちょっと（COLLIDE_EPSだけ）動かしてみる
@@ -263,9 +256,6 @@ def find_contact_object(obj, dx, dy):
     obj_copy.y += dy * COLLIDE_EPS
     # すべての固定された物体に対して
     for obj_fixed in iter_fixed():
-        # 橋は物体が下から突っ込んだとき（移動方向が上向きのとき）は貫通している途中なので接触に含めない
-        if obj_fixed.tag == "bridge" and obj.vy < 0:
-            continue
         # 今までぶつかっていなかったのにちょっと動かしてみたらぶつかったときは衝突と判断して衝突相手の物体を返す
         if not collide(obj, obj_fixed) and collide(obj_copy, obj_fixed):
             return obj_fixed
@@ -285,10 +275,10 @@ def main_physics():
 
     # 接触判定を計算する
     for obj in iter_movable():  # すべての固定されていない物体に対して
-        obj.contact.x_pos = find_contact_object(obj, +1, 0)
-        obj.contact.x_neg = find_contact_object(obj, -1, 0)
-        obj.contact.y_pos = find_contact_object(obj, 0, +1)
-        obj.contact.y_neg = find_contact_object(obj, 0, -1)
+        obj.contact.x_pos = find_obstacle(obj, +1, 0)
+        obj.contact.x_neg = find_obstacle(obj, -1, 0)
+        obj.contact.y_pos = find_obstacle(obj, 0, +1)
+        obj.contact.y_neg = find_obstacle(obj, 0, -1)
 
     # 床についていなかったら重力を与える
     for obj in iter_movable():  # すべての固定されていない物体に対して
@@ -306,11 +296,6 @@ def main_physics():
                 player.vx = vel
         else:  # 移動が予定されていなかったら
             player.vx *= 0.1  # 減速する
-    else:  # 空中にいたら
-        if move_flag != 0:  # 移動が予定されていたら
-            vel = MOVE_VEL * move_flag * MOVE_VEL_FACTOR_AIR  # 空中でもちょっと動ける
-            if player.vx * vel <= 0 or abs(player.vx) < abs(vel):
-                player.vx = vel
 
     # 速度補正：ほかの物体と接触している方向に移動する速度は0にする
     for obj in iter_movable():  # すべての固定されていない物体に対して
@@ -336,9 +321,6 @@ def main_physics():
         #  物体が進みすぎて固定物体にめり込んでいる可能性がある
         #  ここでめり込んだ物体を少しずつ前に戻して衝突を無かったことにする
         for obj_fixed in iter_fixed():  # すべての固定されている物体に対して
-            if obj_fixed.tag == "bridge":  # 橋は下から貫通できるからめり込んでもいい
-                if obj.vy <= 0:
-                    continue
             if not collide(obj_prev, obj_fixed) and collide(obj, obj_fixed):
                 # ↑ 運動前は衝突してなかったけど運動後に衝突したら
                 while collide(obj, obj_fixed):  # 衝突している間

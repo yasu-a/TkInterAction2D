@@ -18,7 +18,10 @@ class Solid:
     y: float  # y座標
     w: float  # 幅
     h: float  # 高さ
+    fixed: bool  # 動かない物体ならTrue
     color: str  # 色（現時点ではすべての物体は単色の四角形。画像を格納するフィールドを作れば画像も表示できるけどそれは後で考えようかな）
+    vx: float = 0.0  # x速度
+    vy: float = 0.0  # y速度
 
 
 # ちなみに変数の定義の後のコロン「:」は「この変数にはこの型の値が入るよ」というヒントを書くPythonの機能
@@ -70,6 +73,20 @@ def get_object_by_tag(tag):
     raise ValueError(f"タグ\"{tag}\"を持つ物体が見つかりません")
 
 
+# リストの中から固定された物体（fixed=True）を繰り返す
+def iter_fixed():
+    for obj in objects:
+        if obj.fixed:
+            yield obj
+
+
+# リストの中から固定されていない物体（fixed=False）を繰り返す
+def iter_movable():
+    for obj in objects:
+        if not obj.fixed:
+            yield obj
+
+
 # ------------------------------------------
 #  物体の初期化
 # ------------------------------------------
@@ -84,6 +101,7 @@ objects.append(
         y=(len(STAGE) - 3) * BLOCK_SIZE + BLOCK_SIZE / 2,  # スタート時のy座標はステージの一番下の床の上
         w=BLOCK_SIZE * 0.3,
         h=BLOCK_SIZE * 0.7,
+        fixed=False,  # プレイヤーは動く（固定オブジェクトではない）
         color="red",  # 赤色で表示
     )
 )
@@ -106,6 +124,7 @@ for i in range(len(STAGE)):  # STAGEのi行目
                     y=i * BLOCK_SIZE,
                     w=BLOCK_SIZE,
                     h=BLOCK_SIZE,
+                    fixed=True,  # 床は固定オブジェクト
                     color="black",
                 )
             )
@@ -117,6 +136,7 @@ for i in range(len(STAGE)):  # STAGEのi行目
                     y=i * BLOCK_SIZE,
                     w=BLOCK_SIZE,
                     h=BLOCK_SIZE * 0.1,
+                    fixed=True,  # 橋は固定オブジェクト
                     color="black",
                 )
             )
@@ -136,13 +156,18 @@ def main_render():
     # すべて消す
     cvs.delete("all")
 
+    # プレイヤーの位置に応じて画面を動かすときに使う座標データの生成
+    player = get_object_by_tag(tag="player")  # プレイヤーのタグを持つ物体を取得
+    screen_x = player.x - 300  # 座標データを生成（下で使う）
+    screen_y = player.y - 300  # 座標データを生成（下で使う）
+
     # すべての物体を位置x,y・サイズw,h・色colorに基づいて描画
     for obj in objects:
         cvs.create_rectangle(
-            obj.x,
-            obj.y,
-            obj.x + obj.w,
-            obj.y + obj.h,
+            obj.x - screen_x,
+            obj.y - screen_y,
+            obj.x + obj.w - screen_x,
+            obj.y + obj.h - screen_y,
             outline=obj.color,
             fill="",
         )
@@ -153,6 +178,7 @@ def main_render():
         10,
         0,
         text=", ".join([
+            f"v=({player.vx:+7.2f}, {player.vy:+7.2f})",
             f"x=({player.x:+6.2f}, {player.y:+6.2f})",
         ]),
         fill="red",
@@ -174,11 +200,32 @@ def main_render():
 #  物理演算
 # ------------------------------------------
 
+G = 900  # 重力加速度（重力の強さ）
+
+t_physics = time.time()  # 物理演算で使うタイマー変数
+
 
 # メイン（物理演算）
 def main_physics():
+    global t_physics
+
     # イベントループにこの処理を予約して繰り返す
     root.after(20, main_physics)
+
+    # t_physicsを使って現在のループと前のループの時刻差t_deltaを出す
+    t_now = time.time()
+    t_delta = t_now - t_physics
+    t_physics = t_now
+
+    # 固定されていない物体に対して重力を与える
+    for obj in iter_movable():  # すべての固定されていない物体に対して
+        obj.vy += G * t_delta
+
+    # 位置計算
+    for obj in iter_movable():  # すべての固定されていない物体に対して
+        # 運動の法則 x = vt を適用
+        obj.x += obj.vx * t_delta
+        obj.y += obj.vy * t_delta
 
 
 # ------------------------------------------
